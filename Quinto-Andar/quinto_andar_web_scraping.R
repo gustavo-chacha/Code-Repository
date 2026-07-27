@@ -6,11 +6,10 @@ library(readxl)
 library(stringr)
 library(stringi)
 library(jsonlite)
-
-setwd("C:/Users/Chacha/Desktop/FGV/Mestrado/Quinto Andar")
+library(here) # anchors paths to the repo root (looked up via .git), so the script runs on any machine
 
 # initial dataset (if you have something scraped already)
-#initial_properties <- read.csv("quinto_andar.csv")
+#initial_properties <- read.csv(here::here("Quinto-Andar", "quinto_andar.csv"))
 
 
 # functions to extract id and latitude/longitude
@@ -28,7 +27,7 @@ get_latlon <- function(page, id){
 }
 
 # neighborhoods information
-neighborhoods_df <- read_xlsx("C:/Users/gusta/Downloads/Lista de bairros de sao paulo.xlsx") %>%
+neighborhoods_df <- read_xlsx(here::here("Quinto-Andar", "Lista de bairros de sao paulo.xlsx")) %>%
   mutate(
     neighborhood = Neighborhood %>%
       tolower() %>%
@@ -132,18 +131,38 @@ for(i in seq_len(length(all_property_links))){
   })
 }
 
-#if you have already scraped something, comment the next line and uncomment the two that follow 
+#if you have already scraped something, comment the next line and uncomment the two that follow
 final_properties <- bind_rows(property_infos)
 #properties_new <- bind_rows(property_infos)
 #final_properties <- rbind(initial_properties, properties_new)
 
+# bug fix: house_info/price fields come out of html_text2() as plain text (e.g. "2 quartos",
+# "R$ 1.500"), so the numeric comparisons inside filter_listings() (>=, <=) were silently
+# failing or coercing incorrectly. Clean them into proper numeric columns first.
+extract_number <- function(x) as.numeric(str_extract(x, "\\d+"))
+extract_price <- function(x) as.numeric(gsub("[^0-9]", "", x))
 
+final_properties <- final_properties %>%
+  mutate(
+    area_m2 = extract_number(area_m2),
+    bedrooms = extract_number(bedrooms),
+    bathrooms = extract_number(bathrooms),
+    parking_spots = extract_number(parking_spots),
+    suites = extract_number(suites),
+    total_price = extract_price(total_price),
+    rent_price = extract_price(rent_price)
+  )
 
 # filtering function
-filter_listings <- function(base, price_limit = NULL, min_bedrooms = NULL, min_bathrooms = NULL, 
-                            near_subway = NULL, min_area_m2 = NULL, furnished = NULL, 
+# bug fix: the near_subway/furnished parameters previously shared their name with the
+# data columns of the same name, so `filter(near_subway == near_subway)` and
+# `filter(furnished == furnished)` compared each column to itself and were always TRUE,
+# meaning those two filters never actually did anything. Parameters are now suffixed with
+# `_filter` so they can't shadow the columns they're meant to filter.
+filter_listings <- function(base, price_limit = NULL, min_bedrooms = NULL, min_bathrooms = NULL,
+                            near_subway_filter = NULL, min_area_m2 = NULL, furnished_filter = NULL,
                             bedroom_closet = NULL, kitchen_cabinet = NULL) {
-  
+
   if (!is.null(min_bedrooms)) {
     base <- base %>% filter(bedrooms >= min_bedrooms)
   }
@@ -153,14 +172,14 @@ filter_listings <- function(base, price_limit = NULL, min_bedrooms = NULL, min_b
   if (!is.null(min_bathrooms)) {
     base <- base %>% filter(bathrooms >= min_bathrooms)
   }
-  if (!is.null(near_subway)) {
-    base <- base %>% filter(near_subway == near_subway)
+  if (!is.null(near_subway_filter)) {
+    base <- base %>% filter(near_subway == near_subway_filter)
   }
   if (!is.null(min_area_m2)) {
     base <- base %>% filter(area_m2 >= min_area_m2)
   }
-  if (!is.null(furnished)) {
-    base <- base %>% filter(furnished == furnished)
+  if (!is.null(furnished_filter)) {
+    base <- base %>% filter(furnished == furnished_filter)
   }
   if (!is.null(bedroom_closet) && bedroom_closet == 1) {
     base <- base %>% filter(str_detect(amenities, "Armários no quarto"))
@@ -168,8 +187,8 @@ filter_listings <- function(base, price_limit = NULL, min_bedrooms = NULL, min_b
   if (!is.null(kitchen_cabinet) && kitchen_cabinet == 1) {
     base <- base %>% filter(str_detect(amenities, "Armários na cozinha"))
   }
-  
+
   return(base)
 }
 
-write.csv(final_properties, file = "quinto_andar.csv", row.names = FALSE)
+write.csv(final_properties, file = here::here("Quinto-Andar", "quinto_andar.csv"), row.names = FALSE)

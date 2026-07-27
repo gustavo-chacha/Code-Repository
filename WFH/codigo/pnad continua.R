@@ -8,6 +8,7 @@ library(readxl)
 library(stats)
 library(scales)
 library(magrittr)
+library(here) # anchors paths to the repo root (looked up via .git), so the script runs on any machine
 
 
 savepdf <- function(plot, filename = "plot.pdf", width = 8, height = 6) {
@@ -15,7 +16,7 @@ savepdf <- function(plot, filename = "plot.pdf", width = 8, height = 6) {
   invisible(plot)
 }
 
-directory <- "D:/Bases de Dados"
+directory <- here::here("WFH", "data")
 file_path <- file.path(directory, "pnadc_combinada_2012_2023.csv")
 #DO NOT RUN - used to get household survey data through API!!!!!!!
 #pnadc_dados <- data.frame(c())
@@ -38,7 +39,7 @@ file_path <- file.path(directory, "pnadc_combinada_2012_2023.csv")
 
 #pnad covid
 {
-pnad_cov <- read.csv("C:/Users/Chacha/Desktop/FGV/IC/data/PNAD_COVID_102020.csv") 
+pnad_cov <- read.csv(here::here("WFH", "data", "PNAD_COVID_102020.csv"))
 replace_C007C <- seq(1,36,1)
 replace_values_C007C <- c(9, 9, 4, 4, 5, 5, 5, 5, 9, 5, 7, 6, 9, 9, 8, 9, 9, 7, 7, 7, 5, 8, 8, 2, 2, 2, 3, 5, 5, 5, 5, 2, 1, 2, 3, 99)
 
@@ -89,7 +90,7 @@ rm(setor_ocup_wfh_rate_occ, setor_ocup_wfh_rate_working)
 #pnad continua - data gathered from API
 {
 
-pnadc_dados <- read.csv('D:/Bases de Dados/pnadc_combinada_2012_2023.csv')
+pnadc_dados <- read.csv(here::here("WFH", "data", "pnadc_combinada_2012_2023.csv"))
 
 
 pnadc_dados$mes <- ifelse(pnadc_dados$Trimestre == '1', 02,
@@ -153,12 +154,15 @@ pnadc_wfh_rate <- pnadc_wfh_rate %>%
       TRUE ~ NA
     ),
     hours_st = (V4039 - mean(V4039))/sd(V4039),
+    # bug fix: `V4022 != NA` is always NA in R (any comparison to NA is NA, never TRUE/FALSE),
+    # so this third branch could never match and silently fell through to the final NA case.
+    # Replaced with the actual "not missing" check.
     wfh_alternative = case_when(
            V4022 == 4 | V4022 == 5 ~ 1,
            V4021 == 1 ~ 0,
-           V4022 != 4 & V4022 != 5 & V4022 != NA ~ 0,
+           V4022 != 4 & V4022 != 5 & !is.na(V4022) ~ 0,
            TRUE ~ NA
-         ), 
+         ),
     Ano = factor(Ano),
     mulher = ifelse(V2007 == 2,1,0)) %>% 
   filter(age >= 18 & age <=55)
@@ -170,7 +174,7 @@ pnadc_wfh_rate <- pnadc_wfh_rate %>%
          wfh_occupation_03 = ifelse(C013_occupation > 0.3,1,0))
 
 #Adjusting wages - this way - 2024 R$
-IPCA <- read_excel("C:/Users/Chacha/Desktop/FGV/IC/data/IPCA mensal.xlsx") %>% 
+IPCA <- read_excel(here::here("WFH", "data", "IPCA mensal.xlsx")) %>%
   mutate(data = ym(Data)) %>% 
   arrange(desc(Data)) %>% 
   mutate(IPCA_ajustado = (1 + IPCA_ajustado)^(1/12) - 1,
@@ -183,7 +187,7 @@ pnadc_wfh_rate <- pnadc_wfh_rate %>%
   merge(IPCA, by = c("ano_tri"), all.x = T, all.y = T) %>% 
   mutate(real_wage = wage*ipca_acc_2024) 
 
-directory <- "D:/Bases de Dados"
+directory <- here::here("WFH", "data")
 file_path <- file.path(directory, "pnadc_wfh_rate_2012_2023.csv")
 pnadc_wfh_rate <- pnadc_wfh_rate[complete.cases(pnadc_wfh_rate$V1028),]
 write.csv(pnadc_wfh_rate, file = file_path)
@@ -191,7 +195,7 @@ write.csv(pnadc_wfh_rate, file = file_path)
 
 #-------now that we treated the datasets, we can get on with our analysis-------
 
-pnadc_wfh_rate <- read.csv('D:/Bases de Dados/pnadc_wfh_rate_2012_2023.csv')
+pnadc_wfh_rate <- read.csv(here::here("WFH", "data", "pnadc_wfh_rate_2012_2023.csv"))
 pnadc_wfh_rate <- pnadc_wfh_rate %>% 
   mutate(educ = as.factor(educ),
          race = as.factor(V2010),
@@ -456,8 +460,12 @@ wage_cria_1 <- glm(log(real_wage) ~ C013 + mulher + pos_pandemia + C013*mulher +
 stargazer::stargazer(wage_reg, wage_cria_0, wage_cria_1, keep = c('C013', 'mulher', 'C013:mulher', 'pos_pandemia', 'mulher:pos_pandemia', 'C013:pos_pandemia', 'C013:mulher:pos_pandemia'), 
                      type = 'latex')
 #criança_pequena na interação
-wage_child_reg <- svyglm(log_real_wage ~ C013 + mulher + young_child + C013*mulher + C013*young_child + mulher*young_child + C013*mulher*young_child + 
-                           hours_st + formal + black + age + age^2 + factor(educ) + rural + factor(Ano), design = z)
+# bug fix: this referenced a column `log_real_wage` that is never created (only `real_wage`
+# exists), and `design = z` pointed at a variable that isn't defined until later loops run
+# (would have thrown "object 'z' not found" if this line executed on a fresh session).
+# Uses log(real_wage) and the already-defined wage-sample survey design instead.
+wage_child_reg <- svyglm(log(real_wage) ~ C013 + mulher + young_child + C013*mulher + C013*young_child + mulher*young_child + C013*mulher*young_child +
+                           hours_st + formal + black + age + age^2 + factor(educ) + rural + factor(Ano), design = svy_wage)
 summary(wage_child_reg)
 
 #-----------
@@ -580,8 +588,10 @@ coef_se_wage_high_educ <- data.frame(matrix(nrow = 0, ncol = 0))
 
 for (x in seq(2012,2023,1)){
   z <- subset(svy_pnadc_alta, subset = Ano == x)
-  assign(paste0('wage_reg_', x), 
-         svyglm(ln(real_wage) ~ C013 + mulher + young_child + C013*mulher + mulher*C013*young_child + 
+  assign(paste0('wage_reg_', x),
+         # bug fix: `ln()` doesn't exist in base R (it's `log()`); this line would have thrown
+         # "could not find function 'ln'" if executed.
+         svyglm(log(real_wage) ~ C013 + mulher + young_child + C013*mulher + mulher*C013*young_child +
                   hours_st + formal + black + + age + age^2 + factor(educ) + rural, design = z))
   
   k <- get(paste0('wage_reg_', x))
@@ -622,7 +632,7 @@ ggplot(data = coef_se_wage_high_educ %>%
   scale_y_continuous()
 
 #---------------------usa vs brasil wfh rate--------------------
-wfh_rate_usa <- read_dta("C:/Users/Chacha/Desktop/FGV/IC/data/wfh_rate_usa.dta") %>% 
+wfh_rate_usa <- read_dta(here::here("WFH", "data", "wfh_rate_usa.dta")) %>%
   rename(ocupacao = occupation,
          setor = work_industry,
          wfh_rate_usa = mean_wfh)
@@ -653,8 +663,10 @@ for (x in c(2020,2021,2022,2024)){
     filter(as.numeric(year) == x)
   assign(paste0('reg', x), lm(wfh_rate_br ~ wfh_rate_usa, data = z))
 }
-z <- wfh_usa_br %>% 
 
+# bug fix: this was a dangling, incomplete pipe (`z <- wfh_usa_br %>%` with nothing piped into
+# it) left over from editing — it would throw a syntax error if the script were sourced as-is.
+# Removed since `z` isn't used again below; wfh_usa_br is used directly.
 stargazer:: stargazer(glm(wfh_rate_br ~ wfh_rate_usa, data = wfh_usa_br, family = binomial(link = "probit")), type = 'latex',
                       title = "WFH rate in Brazil explained by WFH rate in the US by industry and occupation",
                       align = T)

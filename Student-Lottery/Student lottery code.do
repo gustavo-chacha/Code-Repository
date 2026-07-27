@@ -1,4 +1,7 @@
-global bases "C:\Users\gusta\Documents\Student-Lottery"
+* Path is resolved relative to this do-file's own location (data files live in the same
+* folder), so the script runs on any machine without edits.
+local script_dir : di dirname("`c(filename)'")
+global bases "`script_dir'"
 
 clear all
 

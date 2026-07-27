@@ -1,5 +1,8 @@
-global base "C:\Users\Chacha\Desktop\FGV\WFH\data"
-global figures "C:\Users\Chacha\Desktop\FGV\WFH\figures" 
+* Paths are resolved relative to this do-file's own location (script lives in WFH/codigo,
+* data/figures live one level up), so the script runs on any machine without edits.
+local script_dir : di dirname("`c(filename)'")
+global base "`script_dir'/../data"
+global figures "`script_dir'/../figures"
 {
 clear all 
 import delimited "$base/WFHdata_March24.csv", clear
